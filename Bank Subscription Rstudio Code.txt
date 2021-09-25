@@ -1,0 +1,107 @@
+# IMPORTING DATASETS
+trainData <- read.csv("trainset.csv")
+testData <- read.csv("testset.csv")
+
+
+# PACKAGES AND LIBRARIES
+devtools::install_github("boxuancui/DataExplorer")
+library(DataExplorer)
+library(dplyr)
+library(Hmisc)
+install.packages("RWeka")
+library(RWeka)
+library(mice)
+install.packages("caret")
+library(caret)
+install.packages("partykit")
+library(partykit)
+library(rpart)
+install.packages("rpart.plot")
+library(rpart.plot)
+
+
+# EXPLORING DATA
+describe(trainData)
+unique(trainData$age)
+unique(trainData$duration)
+"unknown" %in% trainData$duration # had to double check because not all unique values of duration were displayed due to the high number of distinct values 
+unique(trainData$campaign)
+plot_bar(trainData)
+plot_histogram(trainData)
+
+
+# INFORMATION GAIN RAW DATASET
+trainData[] <- lapply(trainData, factor)
+myFormula <- Subscribed~.
+rawIG <- InfoGainAttributeEval(myFormula, data = trainData)
+par(mar = c(7.1,3.1,3.1,2.1))
+barplot(rawIG, las = 2)
+
+
+# FILLING IN UNKNOWN VALUES
+miceData <- read.csv("trainset.csv")
+miceData[miceData == 'unknown'] <- NA# convert the unknowns to NA to work with the imputation functions
+sapply(miceData, function(x) sum(is.na(x)))# double checking the # of NA's match the unknowns
+
+miceData <- miceData %>% # factorizing the columns that imputation will be done upon
+  mutate(
+    job = as.factor(job),
+    marital = as.factor(marital),
+    education = factor(education, ordered = TRUE, levels = c("basic.4y", "basic.6y", "basic.9y", "high.school", "illiterate", "professional.course", "university.degree")),
+    housing = as.factor(housing),
+    loan = as.factor(loan),
+    pdays = as.factor(pdays) # performed this due to the 999 value which may influence the imputation
+  )
+
+init = mice(miceData, maxit = 0)
+meth = init$method
+predM = init$predictorMatrix
+meth[c("job")]="polyreg"
+meth[c("marital")]="polyreg"
+meth[c("education")]="polr"# education is an ordinal variable, hence the different method being used
+meth[c("housing")]="logreg"
+meth[c("loan")]="logreg"
+imputedData = mice(miceData, method = meth, predictorMatrix = predM, m = 5, nnet.MaxNWts = 13000)
+imputedData <- complete(imputedData)
+sapply(imputedData, function(x) sum(is.na(x)))
+
+
+# NORMALIZING DATA
+imputedData$pdays <- as.integer(levels(imputedData$pdays))[imputedData$pdays]
+preNorm <- preProcess(imputedData[,c(1,10:12,14)], method=c("range"))
+norm <- predict(preNorm, imputedData[,c(1,10:12,14)])
+summary(norm)
+
+
+# MERGING THE NORMALIZED AND IMPUTED TRAINING DATA
+mergedTrainData <- imputedData
+mergedTrainData[["age"]] <- norm$age
+mergedTrainData[["duration"]] <- norm$duration
+mergedTrainData[["campaign"]] <- norm$campaign
+mergedTrainData[["pdays"]] <- norm$pdays
+mergedTrainData[["nr.employed"]] <- norm$nr.employed
+
+
+# INFORMATION GAIN CLEAN DATASET
+cleanSet <- mergedTrainData
+cleanSet <- lapply(cleanSet, factor)
+cleanIG <- InfoGainAttributeEval(myFormula, data = cleanSet)
+par(mar = c(7.1,3.1,3.1,2.1))
+barplot(cleanIG, las = 2)
+
+
+#J48 MODEL 
+J48Tree <- J48(myFormula, data = cleanSet)
+plot(J48Tree)
+testJ48Tree <- predict(J48Tree, newdata = XXXXXXXXXX)
+table(testJ48Tree, XXXXXXXXXXX$Subscribed)
+
+#CTREE MODEL
+#CTree <- ctree(myFormula, data = cleanSet)# returns an error about the number of factor levels in the data
+
+
+#RPART MODEL
+RPARTTree <- rpart(myFormula, data = mergedTrainData)
+rpart.plot(RPARTTree)
+testRPARTTree <- predict(RPARTTree, newdata = XXXXXXXXXX)
+table(testRPARTTree, XXXXXXXXXXX$Subscribed)
